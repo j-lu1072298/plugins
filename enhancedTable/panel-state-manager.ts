@@ -4,25 +4,40 @@
  * States to save and reset:
  *      - displayed rows (on symbology and layer visibility updates)
  *      - column filters
+ *      - column sorts
  *      - whether table maximized is in maximized or split view
  */
 export class PanelStateManager {
     constructor(baseLayer: any, legendBlock: any) {
         this.baseLayer = baseLayer;
         this.isMaximized = baseLayer.table.maximize || false;
-        this.filterByExtent = false;
+        this.showFilter = baseLayer.table.showFilter;
+        this.filterByExtent = baseLayer.table.filterByExtent || false;
         this.columnFilters = {};
         this.open = true;
         this.storedBlock = legendBlock;
         this.columnState = null;
     }
 
-    getColumnFilter(colDefField: any): any {
+    getColumnFilter(colDefField: string): any {
         return this.columnFilters[colDefField];
     }
 
-    setColumnFilter(colDefField, filterValue): void {
-        this.columnFilters[colDefField] = filterValue;
+    setColumnFilter(colDefField: string, filterValue: any): void {
+        let newFilterValue = filterValue;
+        if (filterValue && typeof filterValue === 'string') {
+            const escRegex = /[(!"#$%&\'+,.\\\/:;<=>?@[\]^`{|}~)]/g;
+            newFilterValue = filterValue.replace(escRegex, '\\$&');
+        }
+        this.columnFilters[colDefField] = newFilterValue;
+    }
+
+    get sortModel(): any {
+        return this.storedSortModel;
+    }
+
+    set sortModel(sortModel: any) {
+        this.storedSortModel = sortModel;
     }
 
     set maximized(maximized: boolean) {
@@ -31,6 +46,14 @@ export class PanelStateManager {
 
     get maximized(): boolean {
         return this.isMaximized;
+    }
+
+    get colFilter(): boolean {
+        return this.showFilter;
+    }
+
+    set colFilter(show: boolean) {
+        this.showFilter = show;
     }
 
     set isOpen(isOpen: boolean) {
@@ -49,10 +72,12 @@ export class PanelStateManager {
 export interface PanelStateManager {
     baseLayer: any;
     isMaximized: boolean;
+    showFilter: boolean;
     filterByExtent: boolean;
     rows: any;
     columnFilters: any;
     open: boolean;
+    storedSortModel: any;
     storedBlock: any;
     columnState: any;
 }

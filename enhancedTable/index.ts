@@ -19,32 +19,25 @@ export default class TableBuilder {
     init(mapApi: any) {
         this.mapApi = mapApi;
 
-        this.panel = new PanelManager(mapApi);
-        this.panel.reload = this.reloadTable.bind(this);
+        this.panelManager = new PanelManager(mapApi);
+        this.panelManager.reload = this.reloadTable.bind(this);
 
         this.mapApi.layers.reload.subscribe((baseLayer: any, interval: boolean) => {
-            if (!interval && baseLayer === this.panel.currentTableLayer) {
+            if (!interval && baseLayer === this.panelManager.currentTableLayer) {
                 this.reloadTable(baseLayer);
             }
         });
 
-        // toggle the enhancedTable if toggleDataTable is called from Legend API
-        this.mapApi.ui.configLegend.dataTableToggled.subscribe(legendBlock => {
-            if (this.panel.panelStateManager !== undefined) {
-                // switch state of whether the table is open or not
-                this.panel.panelStateManager.isOpen = !this.panel.panelStateManager.isOpen;
+        this.mapApi.ui.configLegend.elementRemoved.subscribe(legendBlock => {
+            if (legendBlock === this.panelManager.legendBlock) {
+                this.panelManager.panel.close();
             }
-            if (
-                this.panel.panelStateManager === undefined ||
-                this.panel.panelStateManager.isOpen === true ||
-                legendBlock !== this.panel.panelStateManager.legendBlock
-            ) {
-                // if table has never been created, was closed until now, or you are opening a different table
-                // go through loading + opening steps
-                if (this.panel.panelStateManager !== undefined && legendBlock !== this.panel.panelStateManager.legendBlock) {
-                    // make sure to close table if its been opened before
-                    this.panel.close();
-                }
+        });
+
+        // toggle the enhancedTable if toggleDataTable is called from Legend API
+        this.mapApi.ui.configLegend.dataTableToggled.subscribe(({ apiLayer, legendBlock }) => {
+            // Open the table if its closed, never been created or this is a different layer (by comparing API layers, instead of legendBlocks, since reload changes legendBlock)
+            if (this.panelManager.panel.isClosed || !this.panelManager.panelStateManager || this.panelManager.panelStateManager.baseLayer !== apiLayer) {
                 // creates a 'loader' panel to be opened if data hasn't loaded after 200ms
                 this.deleteLoaderPanel();
                 this.loadingPanel = new PanelLoader(this.mapApi, legendBlock);
@@ -55,7 +48,7 @@ export default class TableBuilder {
 
                 this.findMatchingLayer(legendBlock);
             } else {
-                this.panel.close();
+                this.panelManager.panel.close();
             }
         });
     }
@@ -65,7 +58,7 @@ export default class TableBuilder {
             // make sure the item clicked is a node, and not group or other
             let layer;
             if (legendBlock.parentLayerType === 'esriDynamic') {
-                layer = this.mapApi.layers.allLayers.find(function(l) {
+                layer = this.mapApi.layers.allLayers.find(function (l) {
                     return l.id === legendBlock.layerRecordId && l.layerIndex === parseInt(legendBlock.itemIndex);
                 });
             } else {
@@ -76,7 +69,7 @@ export default class TableBuilder {
                 // if layer was created unsubscribe to layer added observable
                 // create + open the enhancedTable
                 this.legendBlock = legendBlock;
-                this.panel.setLegendBlock(legendBlock);
+                this.panelManager.setLegendBlock(legendBlock);
                 if (this.layerAdded !== undefined) {
                     this.layerAdded.unsubscribe();
                 }
@@ -84,8 +77,8 @@ export default class TableBuilder {
                 this.openTable(layer);
             } else {
                 // if layer was not created, subscribe to layer added observable
-                this.layerAdded = this.mapApi.layers.layerAdded.subscribe(layer => {
-                    if (layer.id === legendBlock.layerRecordId) {
+                this.layerAdded = this.mapApi.layers.layerAdded.subscribe(l => {
+                    if (l.id === legendBlock.layerRecordId) {
                         // if matching layer is found, call this function again so that enhancedTable can be created
                         this.findMatchingLayer(legendBlock);
                     }
@@ -99,24 +92,24 @@ export default class TableBuilder {
             // if no PanelStateManager exists for this BaseLayer, create a new one
             baseLayer.panelStateManager = new PanelStateManager(baseLayer, this.legendBlock);
         }
-        this.panel.panelStateManager = baseLayer.panelStateManager;
+        this.panelManager.panelStateManager = baseLayer.panelStateManager;
 
         const attrs = baseLayer.getAttributes();
         this.attributeHeaders = baseLayer.attributeHeaders;
         if (attrs.length === 0) {
             // make sure all attributes are added before creating the table (otherwise table displays without SVGs)
-            this.mapApi.layers.attributesAdded.pipe(take(1)).subscribe(attrs => {
-                if (attrs.attributes.length > 0) {
-                    this.configManager = new ConfigManager(baseLayer, this.panel);
-                    this.panel.configManager = this.configManager;
-                    this.createTable(attrs);
+            this.mapApi.layers.attributesAdded.pipe(take(1)).subscribe(attr => {
+                if (attr.attributes.length > 0) {
+                    this.configManager = new ConfigManager(baseLayer, this.panelManager);
+                    this.panelManager.configManager = this.configManager;
+                    this.createTable(attr);
                 } else {
                     this.openTable(baseLayer);
                 }
             });
         } else {
-            this.configManager = new ConfigManager(baseLayer, this.panel);
-            this.panel.configManager = this.configManager;
+            this.configManager = new ConfigManager(baseLayer, this.panelManager);
+            this.panelManager.configManager = this.configManager;
 
             this.createTable({
                 attributes: attrs,
@@ -128,6 +121,9 @@ export default class TableBuilder {
     deleteLoaderPanel() {
         if (this.loadingPanel) {
             this.loadingPanel.close();
+            if (this.legendBlock.loadingPanel) {
+                this.legendBlock.loadingPanel = undefined;
+            }
         }
         if ($('#enhancedTableLoader') !== undefined) {
             $('#enhancedTableLoader').remove();
@@ -135,11 +131,19 @@ export default class TableBuilder {
     }
 
     createTable(attrBundle: AttrBundle) {
+        const self = this;
         let cols: Array<any> = [];
         const layerProxy = attrBundle.layer._layerProxy;
 
         layerProxy.formattedAttributes.then(a => {
-            Object.keys(a.rows[0]).forEach(columnName => {
+
+            // get column order according to the config if defined
+            // else get default columns
+            const columns = Object.keys(this.configManager.columnConfigs).length > 0 ?
+                ['rvInteractive', 'rvSymbol', ...Object.keys(this.configManager.columnConfigs)] :
+                Object.keys(a.rows[0]);
+
+            columns.forEach(columnName => {
                 if (
                     columnName === 'rvSymbol' ||
                     columnName === 'rvInteractive' ||
@@ -159,6 +163,7 @@ export default class TableBuilder {
                     let colDef: ColumnDefinition = {
                         width: column.width || 100,
                         minWidth: column.width,
+                        maxWidth: column.width,
                         headerName: this.attributeHeaders[columnName] ? this.attributeHeaders[columnName]['name'] : '',
                         headerTooltip: this.attributeHeaders[columnName] ? this.attributeHeaders[columnName]['name'] : '',
                         field: columnName,
@@ -166,19 +171,19 @@ export default class TableBuilder {
                         filter: 'agTextColumnFilter',
                         floatingFilterComponentParams: { suppressFilterButton: true, mapApi: this.mapApi },
                         floatingFilterComponent: undefined,
+                        cellRenderer: function (cell) {
+                            const translated = $(`<span>{{ 'plugins.enhancedTable.table.complexValue' | translate }}</span>`);
+                            self.mapApi.$compile(translated);
+                            return cell.value || !isNaN(cell.value) ? (typeof cell.value === 'object' ? translated[0] : cell.value) : '';
+                        },
                         suppressSorting: false,
                         suppressFilter: column.searchDisabled,
                         sort: column.sort,
-                        hide:
-                            this.configManager.filteredAttributes.length === 0 || column.value !== undefined
-                                ? false
-                                : column.column
-                                ? !column.column.visible
-                                : undefined
+                        suppressMovable: true,
+                        hide: column.column !== undefined && column.column.visible !== undefined ? !column.column.visible : false
                     };
 
-                    this.panel.notVisible[colDef.field] =
-                        this.configManager.filteredAttributes.length === 0 ? false : column.column ? !column.column.visible : undefined;
+
 
                     // set up floating filters and column header
                     const fieldInfo = a.fields.find(field => field.name === columnName);
@@ -191,9 +196,9 @@ export default class TableBuilder {
                             // floating filters of type number, date, text
                             // text can be of type text or selector
                             if (NUMBER_TYPES.indexOf(fieldInfo.type) > -1) {
-                                setUpNumberFilter(colDef, isStatic, column.value, this.tableOptions, this.panel.panelStateManager);
+                                setUpNumberFilter(colDef, isStatic, column.value, this.tableOptions, this.panelManager.panelStateManager);
                             } else if (fieldInfo.type === DATE_TYPE) {
-                                setUpDateFilter(colDef, isStatic, this.mapApi, column.value, this.panel.panelStateManager);
+                                setUpDateFilter(colDef, isStatic, this.mapApi, column.value, this.panelManager.panelStateManager);
                             } else if (fieldInfo.type === TEXT_TYPE && attrBundle.layer.table !== undefined) {
                                 if (isSelector) {
                                     setUpSelectorFilter(
@@ -202,7 +207,7 @@ export default class TableBuilder {
                                         column.value,
                                         this.tableOptions,
                                         this.mapApi,
-                                        this.panel.panelStateManager
+                                        this.panelManager.panelStateManager
                                     );
                                 } else {
                                     setUpTextFilter(
@@ -212,13 +217,13 @@ export default class TableBuilder {
                                         this.configManager.searchStrictMatchEnabled,
                                         column.value,
                                         this.mapApi,
-                                        this.panel.panelStateManager
+                                        this.panelManager.panelStateManager
                                     );
                                 }
                             }
                         }
 
-                        setUpHeaderComponent(colDef, this.mapApi);
+                        setUpHeaderComponent(colDef, this.mapApi, this.tableOptions);
                     }
 
                     // symbols and interactive columns are set up for every table
@@ -233,18 +238,21 @@ export default class TableBuilder {
             // Show toast on layer refresh is refresh interval is set
             const refreshInterval = this.legendBlock.proxyWrapper.layerConfig.refreshInterval;
             if (refreshInterval) {
-                this.panel.toastInterval = setInterval(() => {
-                    this.panel.showToast();
+                this.panelManager.toastInterval = setInterval(() => {
+                    this.panelManager.showToast();
                 }, refreshInterval * 60000);
             }
 
-            this.panel.open(this.tableOptions, attrBundle.layer, this);
+            // Reset floatingFilter to true, will be updated onGridReady to match last value of panelStateManager.showFilter
+            this.tableOptions.floatingFilter = true;
+
+            this.panelManager.open(this.tableOptions, attrBundle.layer, this);
             this.tableApi = this.tableOptions.api;
         });
     }
 
     reloadTable(baseLayer) {
-        this.panel.close();
+        this.panelManager.panel.close();
         this.openTable(baseLayer);
     }
 }
@@ -260,10 +268,10 @@ function setUpSymbolsAndInteractive(columnName: string, colDef: any, cols: any, 
         if (columnName === 'rvSymbol') {
             colDef.maxWidth = 82;
             // set svg symbol for the symbol column
-            colDef.cellRenderer = function(cell) {
+            colDef.cellRenderer = function (cell) {
                 return cell.value;
             };
-            colDef.cellStyle = function(cell) {
+            colDef.cellStyle = function (cell) {
                 return {
                     paddingTop: '7px'
                 };
@@ -273,10 +281,10 @@ function setUpSymbolsAndInteractive(columnName: string, colDef: any, cols: any, 
             // sets details and zoom buttons for the row
             let zoomDef = (<any>Object).assign({}, colDef);
             zoomDef.field = 'zoom';
-            zoomDef.cellRenderer = function(params) {
+            zoomDef.cellRenderer = function (params) {
                 var eSpan = $(ZOOM_TEMPLATE(params.data[layerProxy.oidField]));
                 mapApi.$compile(eSpan);
-                params.eGridCell.addEventListener('keydown', function(e) {
+                params.eGridCell.addEventListener('keydown', function (e) {
                     if (e.key === 'Enter') {
                         eSpan.click();
                     }
@@ -285,10 +293,10 @@ function setUpSymbolsAndInteractive(columnName: string, colDef: any, cols: any, 
                 return eSpan[0];
             };
             cols.splice(0, 0, zoomDef);
-            colDef.cellRenderer = function(params) {
+            colDef.cellRenderer = function (params) {
                 var eSpan = $(DETAILS_TEMPLATE(params.data[layerProxy.oidField]));
                 mapApi.$compile(eSpan);
-                params.eGridCell.addEventListener('keydown', function(e) {
+                params.eGridCell.addEventListener('keydown', function (e) {
                     if (e.key === 'Enter') {
                         eSpan.click();
                     }
@@ -304,10 +312,11 @@ function setUpSymbolsAndInteractive(columnName: string, colDef: any, cols: any, 
 }
 
 /*Helper function to set up column headers*/
-function setUpHeaderComponent(colDef, mApi) {
+function setUpHeaderComponent(colDef, mApi, tableOptions) {
     colDef.headerComponent = CustomHeader;
     colDef.headerComponentParams = {
-        mapApi: mApi
+        mapApi: mApi,
+        tableOptions
     };
 }
 
@@ -323,7 +332,7 @@ export default interface TableBuilder {
     mapApi: any;
     tableOptions: GridOptions;
     tableApi: GridApi;
-    panel: PanelManager;
+    panelManager: PanelManager;
     translations: any;
     configManager: ConfigManager;
     legendBlock: any;
@@ -339,7 +348,7 @@ interface ColumnDefinition {
     maxWidth?: number;
     width?: number;
     field: string;
-    headerComponent?: { new (): CustomHeader };
+    headerComponent?: { new(): CustomHeader };
     headerComponentParams?: HeaderComponentParams;
     filter: string;
     filterParams?: any;
@@ -353,10 +362,12 @@ interface ColumnDefinition {
     sort?: string;
     hide?: boolean;
     cellStyle?: any;
+    suppressMovable: any;
 }
 
 interface HeaderComponentParams {
     mapApi: any;
+    tableOptions: GridOptions;
 }
 
 interface FloatingFilterComponentParams {
@@ -376,6 +387,7 @@ TableBuilder.prototype.tableOptions = {
     floatingFilter: true,
     autoSizePadding: 75,
     suppressColumnVirtualisation: true,
+    suppressDragLeaveHidesColumns: true,
     ensureDomOrder: true,
     defaultColDef: {
         width: 100
@@ -395,13 +407,15 @@ TableBuilder.prototype.translations = {
                 clear: 'Clear filters',
                 apply: 'Apply filters to map'
             },
-            hideColumns: 'Hide columns'
+            hideColumns: 'Hide columns',
+            complexValue: 'Complex Value'
         },
         menu: {
             split: 'Split View',
             max: 'Maximize',
             print: 'Print',
             export: 'Export',
+            options: 'More options',
             filter: {
                 extent: 'Filter by extent',
                 show: 'Show filters'
@@ -429,13 +443,15 @@ TableBuilder.prototype.translations = {
                 clear: 'Effacer les filtres',
                 apply: 'Appliquer des filtres à la carte' // TODO: Add official French translation
             },
-            hideColumns: 'Masquer les colonnes' // TODO: Add Official French translation
+            hideColumns: 'Masquer les colonnes', // TODO: Add Official French translation
+            complexValue: 'Valeur Complexes'
         },
         menu: {
             split: 'Diviser la vue',
             max: 'Agrandir',
             print: 'Imprimer',
             export: 'Exporter',
+            options: 'Plus d’options',
             filter: {
                 extent: 'Filtrer par étendue',
                 show: 'Afficher les filtres'

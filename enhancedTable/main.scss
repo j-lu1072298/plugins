@@ -12,28 +12,70 @@ $accent-color: #00bcd4;
 
 .panel-body {
     padding: 0 8px 8px !important;
+    overflow: hidden;
 }
 
-md-datepicker > div {
+md-datepicker>div {
     // override this so ag-grid wont add a border to the div
     border-bottom: none !important;
 }
 
 .custom-header-label {
     text-transform: none;
+    width: auto;
+    max-width: 80%;
+    min-width: 0 !important;
+    text-overflow: ellipsis;
+    margin-right: 0 !important;
+}
+
+.arrows {
+    flex: 1;
+}
+
+.column-header {
+    display: flex;
 }
 
 .reorder-icons {
-    position: absolute;
+    position: relative;
     top: 0px;
     right: 0px;
+}
+
+.rv-sort-arrow {
+    flex-shrink: 0
+}
+
+
+.rv-render-tooltip {
+    display: inline-block;
+    position: absolute;
+    background-color: #F2F2F2;
+    padding: 2px 5px;
+    box-shadow: 1px 1px 2px #CCC;
+    white-space: normal;
+    word-wrap: break-word;
+    line-height: 1.5;
+    left: -1px;
+    max-width: 250px;
+    overflow: hidden;
+}
+
+.ag-overlay {
+    position: absolute;
+}
+
+.enhanced-table-details,
+.enhanced-table-zoom {
+    margin: 0 !important;
 }
 
 .reorder-button {
     margin: 0 !important;
     width: 18px !important;
     height: 18px !important;
-    min-height: 0;
+    min-height: 0 !important;
     border-radius: 0 !important;
 
     .md-ripple {
@@ -42,24 +84,27 @@ md-datepicker > div {
 }
 
 .rv-record-count {
-    margin: 0;
-    overflow: hidden;
-}
-
-.title-container {
-    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 75%;
+    width: 100%;
+    overflow: hidden;
+    margin-top: 5px;
+    margin-bottom: 0;
+    line-height: 11px;
 }
 
-.table-title {
-    margin: 0;
-    max-width: 100%;
+.md-title {
+    display: block !important;
 }
 
 .table-control {
     display: inherit;
+
+    .md-icon-button {
+        width: 40px !important;
+        height: 40px !important;
+        margin: 0 !important;
+    }
 }
 
 .mobile-table-control {
@@ -93,20 +138,15 @@ md-datepicker > div {
     padding: 0px 12px 0px 16px;
 }
 
-.md-icon-button {
-    width: 40px !important;
-    height: 40px !important;
-    margin: 0 !important;
-}
-
 .md-open-menu-container {
     max-height: 90%;
 }
 
-.rv-table-search  {
+.rv-table-search {
 
     input {
         flex-basis: 163px;
+        -ms-flex-preferred-size: 163px !important;
         min-width: 0px;
     }
 
@@ -118,3 +158,19 @@ md-datepicker > div {
         margin: auto 10px auto 10px;
     }
 }
+
+// allow table cell selection
+.ag-cell {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+}
+
+// preserve horizontal scroll when there are no rows to display
+.ag-body-container {
+    min-height: 2px;
+}
+
+// fix for md-menu elements not showing up immediately in IE (see: https://github.com/angular/material/issues/11226)
+.md-open-menu-container > md-menu-content > * { transition: none !important; }

@@ -126,10 +126,18 @@ export function setUpTextFilter(colDef: any, isStatic: boolean, lazyFilterEnable
         }
     }
 
+    // default to regex filtering for text columns
     if (!lazyFilterEnabled) {
-        // Default to "regex" filtering for text columns
         colDef.filterParams.textCustomComparator = function (filter, value, filterText) {
             const re = new RegExp(`^${filterText.replace(/\*/, '.*')}`);
+            return re.test(value);
+        }
+    } else {
+        colDef.filterParams.textCustomComparator = function (filter, value, filterText) {
+            // treat * as a regular special char with lazy filter on
+            const newFilterText = filterText.replace(/\*/, '\\*');
+            // surround filter text with .* to match anything before and after
+            const re = new RegExp(`^.*${newFilterText}.*`);
             return re.test(value);
         }
     }
@@ -200,7 +208,28 @@ export class TextFloatingFilter {
      * If so fills col filter from either panelStateManager or default value from config
      */
     preLoadedValue(): void {
-        const reloadedVal = this.params.panelStateManager.getColumnFilter(this.params.currColumn.field);
+        let reloadedVal = this.params.panelStateManager.getColumnFilter(this.params.currColumn.field);
+
+        if (typeof reloadedVal === 'string') {
+            // UNESCAPE all special chars (remove the backslash) when reloading table
+            const escRegex = /\\[(!"#$%&\'+,.\\\/:;<=>?@[\]^`{|}~)]/g;
+            // remFilter stores the remaining string text after the last special char (or the entire string, if there are no special chars at all)
+            let remFilter = reloadedVal;
+            let newFilter = '';
+            let escMatch = escRegex.exec(reloadedVal);
+            let lastIdx = 0;
+
+            while (escMatch) {
+                // update all variables after finding an escaped special char, preserving all text except the backslash
+                newFilter = newFilter + reloadedVal.substr(lastIdx, escMatch.index - lastIdx) + escMatch[0].slice(-1);
+                lastIdx = escMatch.index + 2;
+                remFilter = reloadedVal.substr(escMatch.index + 2);
+                escMatch = escRegex.exec(reloadedVal);
+            }
+            newFilter = newFilter + remFilter;
+            reloadedVal = newFilter;
+        }
+
         if (reloadedVal !== undefined) {
             this.eGui.innerHTML = TEXT_FILTER_TEMPLATE(reloadedVal, this.params.isStatic);
             this.scope = this.params.map.$compile(this.eGui);
@@ -215,9 +244,14 @@ export class TextFloatingFilter {
 
     /** Helper function to determine filter model */
     getModel(): any {
+        let newFilter = this.scope.input;
+        if (newFilter && typeof newFilter === 'string') {
+            const escRegex = /[(!"#$&\'+,.\\\/:;<=>?@[\]^`{|}~)]/g;
+            newFilter = newFilter.replace(escRegex, '\\$&');
+        }
         return {
             type: 'contains',
-            filter: this.scope.input
+            filter: newFilter
         }
     }
 
@@ -295,18 +329,23 @@ export class NumberFloatingFilter {
         }
     }
 
-    /** Update filter nimimum */
+    /** Update filter minimum */
     onMinInputBoxChanged() {
         if (this.minFilterInput.value === '') {
             this.currentValues.min = null;
+        } else if (this.minFilterInput.value === '-') {
+            this.currentValues.min = '-';
+        } else if (isNaN(this.minFilterInput.value)) {
+            // TODO: error message for wrong input type
+            this.minFilterInput.value = this.currentValues.min;
         } else {
             this.currentValues.min = Number(this.minFilterInput.value);
         }
 
         // save value on panel reload manager
         let key = this.params.currColumn.field + ' min';
-        this.params.panelStateManager.setColumnFilter(key, this.currentValues.min);
 
+        this.params.panelStateManager.setColumnFilter(key, this.currentValues.min);
         this.onFloatingFilterChanged({ model: this.getModel() });
     }
 
@@ -314,34 +353,40 @@ export class NumberFloatingFilter {
     onMaxInputBoxChanged() {
         if (this.maxFilterInput.value === '') {
             this.currentValues.max = null;
+        } else if (this.maxFilterInput.value === '-') {
+            this.currentValues.max = '-';
+        } else if (isNaN(this.maxFilterInput.value)) {
+            // TODO: error message for wrong input type
+            this.maxFilterInput.value = this.currentValues.max;
         } else {
             this.currentValues.max = Number(this.maxFilterInput.value);
         }
 
         // save value on panel reload manager
         let key = this.params.currColumn.field + ' max';
-        this.params.panelStateManager.setColumnFilter(key, this.currentValues.max);
 
+        this.params.panelStateManager.setColumnFilter(key, this.currentValues.max);
         this.onFloatingFilterChanged({ model: this.getModel() });
     }
 
     /** Helper function to determine filter model */
     getModel(): any {
+        // handle filtering negative values by replacing - with the largest negative number
         if (this.currentValues.min !== null && this.currentValues.max !== null) {
             return {
                 type: 'inRange',
-                filter: this.currentValues.min,
-                filterTo: this.currentValues.max
+                filter: this.currentValues.min === '-' ? Number.MIN_SAFE_INTEGER : this.currentValues.min,
+                filterTo: this.currentValues.max === '-' ? Number.MIN_SAFE_INTEGER : this.currentValues.max
             };
         } else if (this.currentValues.min !== null && this.currentValues.max === null) {
             return {
                 type: 'greaterThanOrEqual',
-                filter: this.currentValues.min
+                filter: this.currentValues.min === '-' ? Number.MIN_SAFE_INTEGER : this.currentValues.min
             };
         } else if (this.currentValues.min === null && this.currentValues.max !== null) {
             return {
                 type: 'lessThanOrEqual',
-                filter: this.currentValues.max
+                filter: this.currentValues.max === '-' ? Number.MIN_SAFE_INTEGER : this.currentValues.max
             };
         } else {
             return {};

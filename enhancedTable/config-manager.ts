@@ -13,7 +13,25 @@ export class ConfigManager {
         this.attributeHeaders = baseLayer.attributeHeaders;
         this.attributeArray = baseLayer._attributeArray;
         this.columnConfigs = {};
-        this.tableConfig = baseLayer.table;
+        const layerEntries = this.baseLayer._viewerLayer._childTree;
+
+        if (this.baseLayer.table.title !== this.panelManager.legendBlock.name &&
+            layerEntries !== undefined) {
+            // if these titles are not the same, and the baseLayer has layer entries
+            // look for the layer entry with the matching name and set ITS table config as the table config
+            let that = this;
+            layerEntries.forEach(entry => {
+                if (entry.proxyWrapper !== undefined && entry.proxyWrapper.name === this.panelManager.legendBlock.name) {
+                    this.tableConfig = entry.proxyWrapper.layerConfig.source.table !== undefined ?
+                        entry.proxyWrapper.layerConfig.source.table : that.baseLayer.table;
+                } else {
+                    this.tableConfig = that.baseLayer.table;
+                }
+            });
+        } else {
+            this.tableConfig = baseLayer.table;
+        }
+
         this.searchEnabled = this.tableConfig.search && this.tableConfig.search.enabled;
         this.tableInit();
     }
@@ -97,6 +115,13 @@ export class ConfigManager {
      */
     get applyMap(): boolean {
         return (this.tableConfig.applyMap !== undefined) ? this.tableConfig.applyMap : false;
+    }
+
+    /**
+     * Returns if the column filters are displayed on the table. If undefined default to true.
+     */
+    get showFilter(): boolean {
+        return (this.tableConfig.showFilter !== undefined) ? this.tableConfig.showFilter : true;
     }
 
     /**

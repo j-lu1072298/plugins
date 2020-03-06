@@ -8,10 +8,13 @@ const pluginList = {
     enhancedTable: path.join(SOURCE_PATH, 'enhancedTable'),
     areasOfInterest: path.join(SOURCE_PATH, 'areasOfInterest'),
     backToCart: path.join(SOURCE_PATH, 'backToCart'),
-    coordInfo: path.join(SOURCE_PATH, 'coordInfo')
+    coordInfo: path.join(SOURCE_PATH, 'coordInfo'),
+    customExport: path.join(SOURCE_PATH, 'customExport'),
+    swiper: path.join(SOURCE_PATH, 'swiper'),
+    geolocator: path.join(SOURCE_PATH, 'geolocator')
 };
 
-const hasLoader = ['enhancedTable'];
+const hasLoader = ['enhancedTable', 'swiper', 'geolocator'];
 
 module.exports = function(env = {}) {
     const config = {

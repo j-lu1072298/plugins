@@ -26,11 +26,12 @@ import { ColumnState } from 'ag-grid-community/dist/lib/columnController/columnC
  */
 export class PanelManager {
     constructor(mapApi: any) {
-        this.notVisible = {};
         this.mapApi = mapApi;
         this.panel = this.mapApi.panels.create('enhancedTable');
+        this.setListeners();
+        this.prepListNavigation();
         this.panel.body = $(`<div rv-focus-exempt></div>`);
-        this.panel.element.addClass('ag-theme-material mobile-fullscreen');
+        this.panel.element.addClass('ag-theme-material mobile-fullscreen tablet-fullscreen');
         this.panel.element.css({
             top: '0px',
             left: '410px'
@@ -42,23 +43,14 @@ export class PanelManager {
         close.addClass('black md-ink-ripple');
         this.setSize();
         //destroy the table properly whenever the panel is closed
-        this.panel.closing.subscribe(response => {
-            if (this.gridBody !== undefined) {
-                removeAccessibilityListeners(this.panel.element[0], this.gridBody);
-            }
-            this.panelStateManager.isOpen = false;
-            this.panelRowsManager.destroyObservers();
-            if (this.toastInterval !== undefined) {
-                clearInterval(this.toastInterval);
-            }
-            this.currentTableLayer = undefined;
-            this.mapApi.mapI.externalPanel(undefined);
+        this.panel.closing.subscribe(() => {
+            this.cleanUp();
         });
     }
 
     set panelStateManager(newPanelStateManager: PanelStateManager) {
         // store the column state before replacing the state manager
-        if (this._panelStateManager) {
+        if (this._panelStateManager && this.tableOptions) {
             this._panelStateManager.columnState = this.tableOptions.columnApi.getColumnState();
         }
         this._panelStateManager = newPanelStateManager;
@@ -72,20 +64,150 @@ export class PanelManager {
         this.legendBlock = block;
     }
 
+    /**
+     * Keeps the scrollbar locked on certain keyboard and mouse movements.
+     * This is to prevent key events like tabbing moving the table's contents.
+     */
+    setListeners() {
+        const enhancedTable = this.panel._element;
+        const that = this;
+
+        $(document).mousemove(() => {
+            if ($('.ag-body-viewport')[0] !== undefined) {
+                $('.ag-body-viewport')[0].style.overflowX = 'auto';
+                $('.ag-body-viewport')[0].style.position = 'static';
+            }
+        })
+
+        enhancedTable.on('keydown keyup', (event) => {
+            event.preventDefault();
+            const focusedList = $('.element-focused')[0];
+            const inList = $(document.activeElement).hasClass('rv-focus-list') || $(document.activeElement).parents().hasClass('rv-focus-list');
+            const focusedCell = that.tableOptions.api.getFocusedCell();
+
+            if (focusedList !== undefined && $(focusedList).hasClass('ag-body-container')) {
+                $('.ag-body-viewport')[0].style.overflowX = 'hidden';
+
+                // if focused on grid body
+                if (event.keyCode === 9 && focusedCell === null) {
+                    // if first tab into grid body automatically focus on first cell
+                    that.tableOptions.api.setFocusedCell(0, 'rvSymbol');
+                } else if (focusedCell !== null && event.keyCode === 27) {
+                    // on esc key, clear focused cell
+                    that.tableOptions.api.clearFocusedCell();
+                }
+            } else {
+                that.tableOptions.api.clearFocusedCell();
+            }
+
+            if ((event.keyCode !== 9 && event.keyCode !== 27) || ($('.element-focused')[0] === undefined && inList)) {
+                // if you are not tabbing or you are tabbing within a list or you're not pressing the escape key
+                // set body to be scrollable
+                $('.ag-body-viewport')[0].style.position = 'static';
+            } else {
+                // if you are tabbing between lists, body should be absolute
+                $('.ag-body-viewport')[0].style.position = 'absolute';
+            }
+        });
+    }
+
+    /**
+     * Add the rv-focus-item and rv-focus-list classes when focus manager reaches the table.
+     */
+    prepListNavigation() {
+
+        const panelBody = this.panel.body;
+
+        this.panel.populateList.subscribe(() => {
+
+            // add rv-focus-list class to both header rows
+            panelBody.find('.ag-header-row').each((index, row) => {
+                if (row.childElementCount > 0) {
+                    $(row).addClass('rv-focus-list');
+                }
+            });
+
+            // add rv-focus-list class to table body, make sure arrow navigation is disabled
+            panelBody.find('.ag-body-container').addClass('rv-focus-list disabled-arrows');
+
+            // add rv-focus-item class to header cells with content in it
+            panelBody.find('.ag-header-cell').each((index, cell) => {
+                if ($(cell).children(':not(span, .ag-cell-label-container, .ag-floating-filter-body)').length > 0) {
+                    $(cell).addClass('rv-focus-item');
+                    $(cell).attr('tabindex', -1);
+                }
+            });
+
+            // add rv-focus-item class to each table cell
+            panelBody.find('.ag-cell').each((index, cell) => {
+                $(cell).addClass('rv-focus-item');
+            });
+        })
+    }
+
     open(tableOptions: any, layer: any, tableBuilder: any) {
         if (this.currentTableLayer === layer) {
-            this.close();
+            this.panel.close();
         } else {
             // close previous table properly if open
             if (this.currentTableLayer) {
-                this.close();
+                this.panel.close();
             }
             this.tableOptions = tableOptions;
 
+            // create tooltips on cell focus when appropriate
+            this.tableOptions.onCellFocused = (cell) => {
+                if (cell.rowIndex !== null) {
+                    const focusedCell = <HTMLElement>$(`[row-index=${cell.rowIndex}]`).find(`[col-id=${cell.column.colId}]`)[0];
+                    const focusedCellText = <HTMLElement>focusedCell.children[0];
+
+                    if (focusedCellText.offsetWidth > focusedCell.offsetWidth) {
+
+                        const positionTooltip = () => {
+                            const tooltip = $('.rv-render-tooltip')[0];
+                            const topMargin = $(focusedCell).offset().top - $(tooltip).offset().top;
+                            const topLeft = $(focusedCell).offset().left - $(tooltip).offset().left;
+                            const overlayBottom = $('.ag-overlay').position().top + $('.ag-overlay').height();
+
+                            // position the tooltip so that it is associated with the focused cell
+                            tooltip.style.top = `${topMargin + 240}px`;
+                            tooltip.style.left = `${topLeft}px`;
+
+                            if (tooltip.offsetTop + $(tooltip).height() > overlayBottom - 20) {
+                                // position the tooltip so that it stays within the grid
+                                tooltip.style.bottom = '20px';
+                            }
+                        }
+
+                        // if the cell text is not  contained within newly focused cell, create an overlay tooltip which shows full text
+                        this.tableOptions.overlayNoRowsTemplate = `<span class='rv-render-tooltip'>${focusedCellText.innerHTML}</span>`;
+                        this.tableOptions.api.showNoRowsOverlay();
+                        positionTooltip();
+                    } else {
+                        // if a text is contained within newly focused cell, hide any overlay tooltips
+                        this.tableOptions.api.hideOverlay();
+                    }
+                }
+            }
+
             // set filter change flag to true
+            // also hide cell tooltips because focus is lost on cells when filters are changed
             this.tableOptions.onFilterChanged = event => {
                 this.sizeColumnsToFitIfNeeded();
                 this.filtersChanged = true;
+                this.tableOptions.api.hideOverlay();
+            };
+
+            // cell tooltips should disappear when column visibilities change
+            // since cell focus is lost when column visibilities change
+            this.tableOptions.onColumnVisible = event => {
+                this.tableOptions.api.hideOverlay();
+            };
+
+            // cell tooltips should disappear when columns move
+            // since cell focus is lost when columns move (focus on header cell that caused movement)
+            this.tableOptions.onColumnMoved = event => {
+                this.tableOptions.api.hideOverlay();
             };
 
             this.panelStatusManager = new PanelStatusManager(this);
@@ -102,6 +224,7 @@ export class PanelManager {
             // set header / controls for panel
             this.makeHeader();
             this.panel.header.title = `{{ 'filter.title' | translate }} ${this.configManager.title}`;
+            this.panel.header.elements.title[0].title = this.panel.header.elements.title[0].innerHTML;
 
             // Add the scroll record count
             let recordCountTemplate = $(RECORD_COUNT_TEMPLATE);
@@ -109,7 +232,7 @@ export class PanelManager {
             this.panel.element.find('.rv-record-count').remove(); // remove old count if there
             this.panel.element.find('header').append(recordCountTemplate[0]);
 
-            //create details and zoom buttons, open the panel and display proper filter values
+            // create details and zoom buttons, open the panel and display proper filter values
             new DetailsAndZoomButtons(this);
             this.panel.body.empty();
             new Grid(this.panel.body[0], tableOptions);
@@ -118,7 +241,11 @@ export class PanelManager {
             if (this.panelStateManager.columnState) {
                 this.tableOptions.columnApi.setColumnState(this.panelStateManager.columnState);
             }
-            this.panel.open();
+            const sortModel = this.panelStateManager.sortModel;
+            if (sortModel !== undefined) {
+                this.tableOptions.api.setSortModel(sortModel);
+            }
+
             this.panelStatusManager.getScrollRange();
             this.panelRowsManager.initObservers();
 
@@ -151,26 +278,34 @@ export class PanelManager {
                 initAccessibilityListeners(this.panel.element[0], this.gridBody, this.tableOptions);
 
                 this.panelStatusManager.getFilterStatus();
-                this.tableOptions.columnDefs.forEach(column => {
-                    if (column.floatingFilterComponentParams.defaultValue !== undefined && this.notVisible[column.field] === true) {
-                        // we temporarily showed some hidden columns with default values (so that table would get filtered properly)
-                        // now toggle them to hidden to respect config specifications
-                        let matchingCol = this.columnMenuCtrl.columnVisibilities.find(col => col.id === column.field);
-                        this.columnMenuCtrl.toggleColumn(matchingCol);
-                    }
-                });
+
+                // on table reopen with show filters off, reset floatingFilter and set to false to proc onFloatingFilterChanged in custom-floating-filters
+                if (!this.panelStateManager.showFilter && this.panelStateManager.showFilter !== this.tableOptions.floatingFilter) {
+                    this.tableOptions.floatingFilter = this.panelStateManager.showFilter;
+                    this.tableOptions.api.refreshHeader();
+                }
 
                 // stop loading panel from opening, if we are about to open enhancedTable
                 clearTimeout(tableBuilder.loadingTimeout);
-
-                if (!tableBuilder.loadingPanel.hidden) {
-                    //if loading panel was opened, make sure it stays on for at least 400 ms
+                if (tableBuilder.loadingPanel.isOpen) {
+                    // if loading panel was opened, make sure it stays on for at least 400 ms
                     setTimeout(() => {
                         tableBuilder.deleteLoaderPanel();
                     }, 400);
                 } else {
                     tableBuilder.deleteLoaderPanel();
                 }
+
+                this.tableOptions.columnDefs.forEach(column => {
+                    const matchingCol = this.columnMenuCtrl.columnVisibilities.find(col => col.id === column.field);
+                    if (matchingCol !== undefined && matchingCol.visibility === false) {
+                        // temporarily show column filter of hidden columns (so that table gets filtered properly)
+                        this.columnMenuCtrl.toggleColumn(matchingCol);
+                        // then hide column (to respect config specifications)
+                        this.columnMenuCtrl.toggleColumn(matchingCol);
+                    }
+                });
+
                 this.panel.open();
                 this.autoSizeToMaxWidth();
                 this.sizeColumnsToFitIfNeeded();
@@ -178,9 +313,25 @@ export class PanelManager {
         }
     }
 
-    close() {
+    /**
+     * Cleans up the table when the panel is being closed.
+     */
+    cleanUp() {
+        this.panelStateManager.sortModel = this.tableOptions.api.getSortModel();
+
+        if (this.gridBody !== undefined) {
+            removeAccessibilityListeners(this.panel.element[0], this.gridBody);
+        }
         this.panelStateManager.isOpen = false;
-        this.panel.close();
+        this.panelRowsManager.destroyObservers();
+        if (this.toastInterval !== undefined) {
+            clearInterval(this.toastInterval);
+        }
+        this.currentTableLayer = undefined;
+
+        // if enhancedTable closes, set focus to close button
+        const mapNavContent = $('#' + this.mapApi.id).find('.rv-mapnav-content');
+        mapNavContent.find('button')[0].focus();
     }
 
     onBtnExport() {
@@ -213,10 +364,8 @@ export class PanelManager {
     setSize() {
         if (this.maximized) {
             this.panel.element.css({ bottom: '0' });
-            this.mapApi.mapI.externalPanel($('#enhancedTable'));
         } else {
             this.panel.element.css({ bottom: '50%' });
-            this.mapApi.mapI.externalPanel(undefined);
         }
     }
 
@@ -301,10 +450,20 @@ export class PanelManager {
         this.mapApi.$compile($(`<div ng-controller="ToastCtrl as ctrl"></div>`));
     }
 
+    /**
+     * Forces tooltips to hide.
+     * Apply to map and clear filter tooltips are shown on click and mouseleave on IE/edge.
+     */
+    hideToolTips() {
+        Array.from(document.getElementsByTagName('md-tooltip')).forEach(tooltip => {
+            tooltip.classList.remove('md-show');
+        });
+    }
+
     angularHeader() {
         const that = this;
-        this.mapApi.agControllerRegister('ToastCtrl', function($scope, $mdToast, $rootElement) {
-            that.showToast = function() {
+        this.mapApi.agControllerRegister('ToastCtrl', ['$scope', '$mdToast', '$rootElement', function ($scope, $mdToast, $rootElement) {
+            that.showToast = function () {
                 if ($rootElement.find('.table-toast').length === 0) {
                     $mdToast.show({
                         template: TABLE_UPDATE_TEMPLATE,
@@ -322,12 +481,12 @@ export class PanelManager {
             };
 
             $scope.closeToast = () => $mdToast.hide();
-        });
+        }]);
 
-        this.mapApi.agControllerRegister('SearchCtrl', function() {
+        this.mapApi.agControllerRegister('SearchCtrl', function () {
             that.searchText = that.configManager.defaultGlobalSearch;
             this.searchText = that.searchText ? that.searchText : '';
-            this.updatedSearchText = function() {
+            this.updatedSearchText = function () {
                 that.searchText = this.searchText;
                 // don't filter unless there are at least 3 characters
                 if (this.searchText.length > 2) {
@@ -341,7 +500,7 @@ export class PanelManager {
                 that.panelStatusManager.getFilterStatus();
                 that.tableOptions.api.deselectAllFiltered();
             };
-            this.clearSearch = function() {
+            this.clearSearch = function () {
                 that.searchText = '';
                 this.searchText = that.searchText;
                 this.updatedSearchText();
@@ -351,43 +510,43 @@ export class PanelManager {
             that.clearGlobalSearch = this.clearSearch.bind(this);
         });
 
-        this.mapApi.agControllerRegister('MenuCtrl', function() {
+        this.mapApi.agControllerRegister('MenuCtrl', function () {
             this.appID = that.mapApi.id;
             this.maximized = that.maximized ? 'true' : 'false';
-            this.showFilter = !!that.tableOptions.floatingFilter;
+            this.showFilter = that.panelStateManager.colFilter;
             this.filterByExtent = that.panelStateManager.filterByExtent;
             this.printEnabled = that.configManager.printEnabled;
 
             // sets the table size, either split view or full height
             // saves the set size to PanelStateManager
-            this.setSize = function(value) {
+            this.setSize = function (value) {
                 that.panelStateManager.maximized = value === 'true' ? true : false;
-                !that.maximized ? that.mapApi.mapI.externalPanel(undefined) : that.mapApi.mapI.externalPanel($('#enhancedTable'));
                 that.maximized = value === 'true' ? true : false;
                 that.setSize();
                 that.panelStatusManager.getScrollRange();
             };
 
             // print button has been clicked
-            this.print = function() {
+            this.print = function () {
                 that.onBtnPrint();
             };
 
             // export button has been clicked
-            this.export = function() {
+            this.export = function () {
                 that.onBtnExport();
             };
 
             // Hide filters button has been clicked
-            this.toggleFilters = function() {
+            this.toggleFilters = function () {
+                that.panelStateManager.colFilter = this.showFilter;
+
                 that.tableOptions.floatingFilter = this.showFilter;
                 that.tableOptions.api.refreshHeader();
             };
 
             // Sync filterByExtent
-            this.filterExtentToggled = function() {
+            this.filterExtentToggled = function () {
                 that.panelStateManager.filterByExtent = this.filterByExtent;
-
                 // On toggle, filter by extent or remove the extent filter
                 if (that.panelStateManager.filterByExtent) {
                     that.panelRowsManager.filterByExtent(that.mapApi.mapI.extent);
@@ -397,9 +556,10 @@ export class PanelManager {
             };
         });
 
-        this.mapApi.agControllerRegister('ClearFiltersCtrl', function() {
+        this.mapApi.agControllerRegister('ClearFiltersCtrl', function () {
             // clear all column filters
-            this.clearFilters = function() {
+            this.clearFilters = function () {
+                that.hideToolTips();
                 const columns = Object.keys(that.tableOptions.api.getFilterModel());
                 let newFilterModel = {};
 
@@ -415,14 +575,17 @@ export class PanelManager {
                 });
 
                 newFilterModel = newFilterModel !== {} ? newFilterModel : null;
-                that.clearGlobalSearch();
+                if (that.clearGlobalSearch !== undefined) {
+                    that.clearGlobalSearch();
+                }
                 that.tableOptions.api.setFilterModel(newFilterModel);
+                that.filtersChanged = true;
             };
 
             // determine if there are any active column filters
             // returns true if there are no active column filters, false otherwise
             // this determines if Clear Filters button is disabled (when true) or enabled (when false)
-            this.noActiveFilters = function() {
+            this.noActiveFilters = function () {
                 if (that.tableOptions.api !== undefined) {
                     const columns = Object.keys(that.tableOptions.api.getFilterModel());
                     // if there is a non static column fiter, the clearFilters button is enabled
@@ -438,31 +601,43 @@ export class PanelManager {
             };
         });
 
-        this.mapApi.agControllerRegister('ApplyToMapCtrl', function() {
-            // returns true if a filter has been changed since the last
-            this.filtersChanged = function() {
-                return that.filtersChanged;
+        this.mapApi.agControllerRegister('ApplyToMapCtrl', function () {
+
+            this.filtersChanged = function () {
+                if (that.filtersChanged) {
+                    const filtersQuery = getFiltersQuery();
+                    const fState = that.legendBlock.proxyWrapper.filterState
+                    const mapFilter = fState.getSql(fState.coreFilterTypes.GRID);
+                    // if filter is changed
+                    // check if filter changed is the same as one applied to map
+                    // if not, apply to map will be enabled
+                    // else it will be disabled
+                    return filtersQuery !== mapFilter;
+                }
+                return false;
             };
 
             // apply filters to map
-            this.applyToMap = function() {
+            this.applyToMap = function () {
                 const filter = that.legendBlock.proxyWrapper.filterState;
-                filter.setSql(filter.coreFilterTypes.GRID, getFiltersQuery());
+                const mapFilterQuery = getFiltersQuery();
+                filter.setSql(filter.coreFilterTypes.GRID, mapFilterQuery);
                 that.filtersChanged = false;
+                that.hideToolTips();
             };
 
-            // get filter SQL qeury string
+            // get filter SQL query string
             function getFiltersQuery() {
                 const filterModel = that.tableOptions.api.getFilterModel();
                 let colStrs = [];
                 Object.keys(filterModel).forEach(col => {
                     colStrs.push(filterToSql(col, filterModel[col]));
                 });
-                if (that.searchText) {
-                    const globalSearchVal = globalSearchToSql();
+                if (that.searchText && that.searchText.length > 2) {
+                    const globalSearchVal = globalSearchToSql() !== '' ? globalSearchToSql() : '1=2';
                     if (globalSearchVal) {
-                        // will be an empty string if there are no visible rows
-                        colStrs.push(globalSearchVal);
+                        // do not push an empty global search
+                        colStrs.push(`(${globalSearchVal})`);
                     }
                 }
                 return colStrs.join(' AND ');
@@ -478,11 +653,34 @@ export class PanelManager {
                         } else {
                             let val = colFilter.filter.replace(/'/g, /''/);
                             if (val !== '') {
-                                if (that.configManager.lazyFilterEnabled) {
-                                    const filterVal = `*${val}`;
-                                    val = filterVal.split(' ').join('*');
+                                // following code is to UNESCAPE all special chars for ESRI and geoApi SQL to parse properly (remove the backslash)
+                                const escRegex = /\\[(!"#$&\'+,.\\\/:;<=>?@[\]^`{|}~)]/g;
+                                // remVal stores the remaining string text after the last special char (or the entire string, if there are no special chars at all)
+                                let remVal = val;
+                                let newVal = '';
+                                let escMatch = escRegex.exec(val);
+                                // lastIdx stores the last found index of the start of an escaped special char
+                                let lastIdx = 0;
+                                while (escMatch) {
+                                    // update all variables after finding an escaped special char, preserving all text except the backslash
+                                    newVal = newVal + val.substr(lastIdx, escMatch.index - lastIdx) + escMatch[0].slice(-1);
+                                    lastIdx = escMatch.index + 2;
+                                    remVal = val.substr(escMatch.index + 2);
+                                    escMatch = escRegex.exec(val);
                                 }
-                                return `UPPER(${col}) LIKE \'${val.replace(/\*/g, '%').toUpperCase()}%\'`;
+                                newVal = newVal + remVal;
+
+                                // add ௌ before % and/or _ to act as the escape character
+                                // can change to MOST other characters and should still work (ideally want an escape char no one will search for) - just replace all instances of ௌ
+                                newVal = newVal.replace(/%/g, 'ௌ%');
+                                newVal = newVal.replace(/_/g, 'ௌ_');
+                                if (that.configManager.lazyFilterEnabled) {
+                                    const filterVal = `*${newVal}`;
+                                    newVal = filterVal.split(' ').join('*');
+                                }
+                                // if val contains a % or _, add ESCAPE 'ௌ' at the end of the query
+                                let sqlWhere = `UPPER(${col}) LIKE \'${newVal.replace(/\*/g, '%').toUpperCase()}%\'`;
+                                return sqlWhere.includes('ௌ%') || sqlWhere.includes('ௌ_') ? `${sqlWhere} ESCAPE \'ௌ\'` : sqlWhere;
                             }
                         }
                     case 'number':
@@ -540,16 +738,18 @@ export class PanelManager {
                 let filteredColumns = [];
                 columns.forEach(column => {
                     for (let row of sortedRows) {
-                        if (re.test(row.data[column.colId].toUpperCase())) {
+                        const cellData = row.data[column.colId] === null ? null : row.data[column.colId].toString();
+                        if (cellData !== null && re.test(cellData.toUpperCase())) {
                             filteredColumns.push(`UPPER(${column.colId}) LIKE \'${filterVal}%\'`);
+                            return;
                         }
                     }
                 });
-                return filteredColumns.join(' AND ');
+                return filteredColumns.join(' OR ');
             }
         });
 
-        this.mapApi.agControllerRegister('ColumnVisibilityMenuCtrl', function() {
+        this.mapApi.agControllerRegister('ColumnVisibilityMenuCtrl', function () {
             that.columnMenuCtrl = this;
             this.columns = that.tableOptions.columnDefs;
             this.columnVisibilities = this.columns
@@ -560,7 +760,7 @@ export class PanelManager {
                 .sort((firstEl, secondEl) => firstEl['title'].localeCompare(secondEl['title']));
 
             // toggle column visibility
-            this.toggleColumn = function(col) {
+            this.toggleColumn = function (col) {
                 const column = that.tableOptions.columnApi.getColumn(col.id);
 
                 col.visibility = !column.visible;
@@ -570,6 +770,7 @@ export class PanelManager {
                 // on showing a column resize to autowidth then shrink columns that are too wide
                 if (col.visibility) {
                     that.autoSizeToMaxWidth();
+                    that.panelStateManager.columnState = that.tableOptions.columnApi.getColumnState();
                 }
 
                 // fit columns widths to table if there's empty space
@@ -577,11 +778,11 @@ export class PanelManager {
             };
         });
 
-        this.mapApi.agControllerRegister('MobileMenuCtrl', function() {
+        this.mapApi.agControllerRegister('MobileMenuCtrl', function () {
             that.mobileMenuScope.visible = false;
             that.mobileMenuScope.sizeDisabled = true;
 
-            this.toggleMenu = function() {
+            this.toggleMenu = function () {
                 that.mobileMenuScope.visible = !that.mobileMenuScope.visible;
             };
         });
@@ -615,7 +816,6 @@ export interface PanelManager {
     filtersChanged: boolean;
     hiddenColumns: any;
     columnMenuCtrl: any;
-    notVisible: any;
     clearGlobalSearch: Function;
     reload: Function;
     toastInterval: any;

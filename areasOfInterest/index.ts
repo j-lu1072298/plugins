@@ -29,7 +29,7 @@ class AreasOfInterest {
 
         AreasOfInterest.instances[this.api.id] = this;
 
-        const topElement = $('<ul style="overflow-y:auto;" class="rv-list rv-basemap-list"></ul>');
+        const topElement = $('<ul class="rv-list rv-basemap-list"></ul>');
 
         this.config.areas.forEach((area, i) => {
             let areaHTML = this.config.noPicture ? noPic : hasPic;
@@ -38,7 +38,7 @@ class AreasOfInterest {
             topElement.append(areaHTML);
 
             const currBtn = topElement.find('button').last();
-            currBtn.click(() => (this.api.extent = area));
+            currBtn.click(() => (this.api.setExtent(area)));
         });
 
         this.button = this.api.mapI.addPluginButton(
@@ -54,8 +54,13 @@ class AreasOfInterest {
     }
 
     onMenuItemClick() {
+        const openPanel = () => {
+            this._RV.toggleSideNav('close');
+            this.panel.open();
+        }
+
         return () => {
-            this.button.isActive ? this.panel.close() : this.panel.open();
+            this.button.isActive ? this.panel.close() : openPanel();
         };
     }
 
@@ -88,7 +93,6 @@ class AreasOfInterest {
         this.panel.header.title = 'plugins.areasOfInterest.title';
 
         this.panel.body = bodyElement;
-        this.panel.open();
     }
 }
 

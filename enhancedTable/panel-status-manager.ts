@@ -27,29 +27,43 @@ export class PanelStatusManager {
         }
 
         tableOptions.onBodyScroll = function (event) {
-            that.getScrollRange();
+            const scrollRange = that.getScrollRange();
+            const focusedCell = that.tableOptions.api.getFocusedCell();
+
+            if (focusedCell !== null) {
+                const topRow = parseInt(scrollRange.split(' - ')[0]) - 1;
+                const bottomRow = parseInt(scrollRange.split(' - ')[1]) - 1;
+                const tableRight = $('#enhancedTable').position().left + $('#enhancedTable').width();
+                const focusedCellRight = $('.ag-cell-focus').offset().left + $('.ag-cell-focus').width();
+                const focusedRow = focusedCell.rowIndex;
+
+                if (topRow < focusedRow && bottomRow > focusedRow && tableRight > focusedCellRight) {
+                    // refocus cell on scroll if it is within grid view
+                    // this way adjusting the position and height of any associated tooltips is forced through onCellFocused event
+                    that.tableOptions.api.setFocusedCell(focusedCell.rowIndex, focusedCell.column.colId);
+                } else {
+                    // hide any tooltips that may be visible if the focused cell is out of grid view
+                    that.tableOptions.api.hideOverlay();
+                }
+            }
         }
     }
 
     // gets the updated text to display for the enhancedTable's filter status
     getFilterStatus() {
-        let text: string;
+        this.panelManager.recordCountScope.shownRecords = this.tableOptions.api.getDisplayedRowCount();
+        this.panelManager.recordCountScope.totalRecords = this.tableOptions.rowData.length;
 
+        // rows are filtered
         if (this.tableOptions.api && this.tableOptions.api.getDisplayedRowCount() < this.tableOptions.rowData.length) {
-            text = `${this.tableOptions.api.getDisplayedRowCount()} records shown (filtered from ${this.tableOptions.rowData.length} records)`;
+            this.panelManager.recordCountScope.filtered = true;
             this.panelManager.legendBlock.filter = true; // add filter flag if rows are filtered
-        }
-        else {
-            text = `${this.tableOptions.rowData.length} records shown`;
+        } else {
+            this.panelManager.recordCountScope.filtered = false;
             this.panelManager.legendBlock.filter = false; // clear filter flag if all rows shown
         }
 
-        // if (this.panelManager.panel.panelControls.find('.filterRecords')[0]) {
-        //     this.panelManager.panel.panelControls.find('.filterRecords')[0].innerHTML = text;
-        // }
         this.getScrollRange();
-        this.panelManager.recordCountScope.filterRecords = text;
-        return text;
     }
 
     // gets the updated row range to get as table is scrolled vertically (example "showing 1-10 of 50 entries")

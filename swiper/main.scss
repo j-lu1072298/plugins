@@ -1,0 +1,83 @@
+// set the colors
+$primary-color: rgba(50,50,50,0.75);
+$accent-color: #fff;
+
+// overwrite ESRI layer swiper class
+.LayerSwipe {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+
+    .handleContainer {
+        position:relative;
+        width: 100%;
+        height: 100%;
+        z-index: 1;
+    }
+
+    .vertical:before {
+        content: "";
+        display: block;
+        position: absolute;
+        background-color: $primary-color;
+
+        left: 5px;
+        height: 100%;
+        width: 1px;
+    }
+
+    .vertical {
+        position: absolute;
+        background-color: $primary-color;
+        z-index: 30;
+        -moz-box-sizing: content-box;
+        -webkit-box-sizing: content-box;
+        box-sizing: content-box;
+        margin: 0;
+        padding: 0!important;
+
+        width: 11px;
+        height: 100%;
+        cursor: col-resize;
+        top: 0px!important;
+
+        .handle:before {
+            margin-right: 11px;
+        }
+
+        .handle:before, .handle:after {
+            display: block;
+            float: left;
+            text-align: center;
+            background-color: $primary-color;
+            color: $accent-color;
+
+            content: "\268C";
+            width: 20px;
+            height: 24px;
+            line-height: 2;
+            transform: rotate(90deg);
+        }
+
+        .handle {
+            position: absolute;
+            z-index: 30;
+            speak: none;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            font-size: 12px;
+
+            width: 51px;
+            height: 24px;
+            margin-top: -12px;
+            margin-left: -20px;
+            top: 50%;
+            left: 0;
+        }
+    }
+
+    .vertical:hover {
+        filter: progid:DXImageTransform.Microsoft.Alpha(Opacity=75);
+        opacity: 0.75;
+    }    
+}

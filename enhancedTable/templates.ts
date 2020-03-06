@@ -56,7 +56,7 @@ export const COLUMN_VISIBILITY_MENU_TEMPLATE = `
         <md-menu-content class="rv-menu rv-dense">
             <md-menu-item ng-repeat="col in ctrl.columnVisibilities">
                 <md-button ng-click="ctrl.toggleColumn(col)" aria-label="{{ col.title }}" md-prevent-menu-close="md-prevent-menu-close">
-                    <span style='overflow-wrap:normal'>{{col.title}}</span>
+                    <span style='flex-basis: auto; overflow-wrap:normal;'>{{col.title}}</span>
                     <md-icon md-svg-icon="action:done" ng-if="col.visibility"></md-icon>
                 </md-button>
             </md-menu-item>
@@ -73,6 +73,7 @@ export const MENU_TEMPLATE = `
             class="md-icon-button black"
             ng-click="$mdOpenMenu($event)">
             <md-icon md-svg-src="navigation:more_vert"></md-icon>
+            <md-tooltip>{{ 'plugins.enhancedTable.menu.options' | translate }}</md-tooltip>
         </md-button>
         <md-menu-content class="rv-menu rv-dense">
             <md-menu-item type="radio" ng-model="ctrl.maximized" value="false" ng-click="ctrl.setSize(ctrl.maximized)" ng-if="!sizeDisabled" rv-right-icon="none">
@@ -127,13 +128,13 @@ export const MOBILE_MENU_TEMPLATE = `
 </div>`;
 
 export const RECORD_COUNT_TEMPLATE = `
-<p class="rv-record-count">
-    <span class="scrollRecords">{{ scrollRecords }}</span> of
-    <span class="filterRecords">{{ filterRecords }}</span>
+<p class="rv-record-count" title="{{ 'filter.default.label.info' | translate:{range: scrollRecords, total: totalRecords, max: totalRecords} }}" >
+    <span class="filterRecords" ng-if="filtered == false">{{ 'filter.default.label.info' | translate:{range: scrollRecords, total: totalRecords, max: totalRecords} }}</span>
+    <span class="filterRecords" ng-if="filtered == true">{{ 'filter.default.label.filtered' | translate:{range: scrollRecords, total: shownRecords, max: totalRecords} }}</span>
 </p>`;
 
 export const DETAILS_TEMPLATE = (oid) =>
-    `<button ng-controller='DetailsAndZoomCtrl as ctrl' ng-click='ctrl.openDetails(${oid})' md-ink-ripple class='md-icon-button rv-icon-16 rv-button-24 md-button ng-scope enhanced-table-details' aria-label="{{ 'plugins.enhancedTable.detailsAndZoom.details' | translate }}">
+    `<button ng-controller='DetailsAndZoomCtrl as ctrl' ng-click='ctrl.openDetails(${oid})' md-ink-ripple class='md-icon-button rv-icon-16 md-button ng-scope enhanced-table-details' aria-label="{{ 'plugins.enhancedTable.detailsAndZoom.details' | translate }}">
         <md-icon md-svg-src="action:description" aria-hidden='false' class='ng-scope' role='img'>
             <md-tooltip  md-direction="top">{{ 'plugins.enhancedTable.detailsAndZoom.details' | translate }}</md-tooltip>
         </md-icon>
@@ -147,8 +148,8 @@ export const ZOOM_TEMPLATE = (oid) =>
     </button>`;
 
 export const NUMBER_FILTER_TEMPLATE = (value, isStatic) => {
-    const minVal = (value === undefined) ? '' : (value.split(',')[0] !== '') ? parseInt(value.split(',')[0]) : '';
-    const maxVal = (value === undefined) ? '' : (value.split(',')[1] !== '') ? parseInt(value.split(',')[1]) : '';
+    const minVal = (value === undefined) ? '' : (value.split(',')[0] !== 'null') ? parseInt(value.split(',')[0]) : '';
+    const maxVal = (value === undefined) ? '' : (value.split(',')[1] !== 'null') ? parseInt(value.split(',')[1]) : '';
     if (isStatic === false) {
         return `<input class="rv-min" style="width:50%" type="text" placeholder="min" value='${minVal}'/>
          <input class="rv-max" style="width:50%" type="text" placeholder="max" value='${maxVal}'/>`;
@@ -182,10 +183,11 @@ export const TEXT_FILTER_TEMPLATE = (value, isStatic) => {
 };
 
 export const CUSTOM_HEADER_TEMPLATE = (displayName: string) => `
-<div>
+<div class="column-header">
     <md-button class="custom-header-label">${displayName}</md-button>
-    <md-icon ng-if="sortAsc" md-svg-icon="navigation:arrow_upward"></md-icon>
-    <md-icon ng-if="sortDesc" md-svg-icon="navigation:arrow_downward"></md-icon>
+    <md-icon ng-if="sortAsc" class="rv-sort-arrow" md-svg-icon="navigation:arrow_upward"></md-icon>
+    <md-icon ng-if="sortDesc" class="rv-sort-arrow" md-svg-icon="navigation:arrow_downward"></md-icon>
+    <div class="arrows"></div>
     <div class="reorder-icons">
         <md-button class="reorder-button md-icon-button move-left" ng-disabled="min">
             <md-icon ng-style="{ 'font-size': '16px', height: '16px' }" md-svg-icon="hardware:keyboard_arrow_left"></md-icon>
@@ -254,7 +256,7 @@ export const PRINT_TABLE = (title, cols, rws) => {
                 </style>
             </head>
             <body class ='dt-print-view'>
-                <div class="title-container">
+                <div>
                     <h1 class="md-title" style='padding:8px;'>Features: ${title}</h1>
                     <table>${columns}${rows}</table>
                 </div>
@@ -265,7 +267,7 @@ export const TABLE_UPDATE_TEMPLATE =
     `<md-toast class="table-toast">
         <span class="md-toast-text flex">{{ 'filter.default.label.outOfDate' | translate }}</span>
         <md-button class="md-highlight" ng-click="reloadTable()">{{ 'filter.default.action.outOfDate' | translate }}</md-button>
-        <md-button ng-click="closeToast()">{{ 'filter.default.action.close' | translate }}</md-button>
+        <md-button ng-click="closeToast()">{{ 'filter.default.action.hide' | translate }}</md-button>
     </md-toast>`;
 
 export const TABLE_LOADING_TEMPLATE = (legendEntry) =>
